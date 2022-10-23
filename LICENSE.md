@@ -1,3 +1,5 @@
+MIT License
+
 RainEngine a small game Engine
 Copyright © 2022 Jacob
 
