@@ -1,0 +1,19 @@
+[package]
+name = "rain_editor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+readme = "../../README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+egui_dock = { path = "../../../egui_dock/"}
+bytemuck = "1.12.1"
+puffin = "0.13.3"
+puffin_egui = "0.17.0"
+
+[dependencies.eframe]
+version = "0.19.0"
+default_features = false
+features = ["wgpu", "default_fonts", "puffin"]
