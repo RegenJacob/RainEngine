@@ -2,7 +2,8 @@
 resolver = "2"
 members = [
   "crates/rain_engine",
-  "crates/rain_editor"
+  "crates/rain_editor",
+  "crates/cloudy_renderer"
 ]
 
 [profile.release]

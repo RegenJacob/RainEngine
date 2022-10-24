@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 readme = "../../README.md"
+repository = "https://github.com/RegenJacob/egui_logger"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,8 +13,18 @@ egui_dock = { path = "../../../egui_dock/"}
 bytemuck = "1.12.1"
 puffin = "0.13.3"
 puffin_egui = "0.17.0"
+env_logger = "0.9.1"
+log = "0.4.17"
+
+[dependencies.egui_logger]
+version = "0.2.0"
+#path = "../../../egui_logger/"
+
+[dependencies.cloudy_renderer]
+path = "../cloudy_renderer/"
 
 [dependencies.eframe]
 version = "0.19.0"
 default_features = false
 features = ["wgpu", "default_fonts", "puffin"]
+

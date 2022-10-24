@@ -28,7 +28,6 @@ impl egui_dock::TabViewer for TabViewer {
             "Viewer" => {
                 //self.custom_painting(ui);
                 ui.horizontal(|ui| {
-
                     if ui.button("run").clicked() {
                         println!("cargo run [Project]")
                     }
@@ -43,6 +42,9 @@ impl egui_dock::TabViewer for TabViewer {
             },
             "Editor Debug" => {
                 puffin_egui::profiler_ui(ui)
+            },
+            "Log" => {
+                egui_logger::logger_ui(ui)
             },
             _ => {
                 ui.label(format!("Content of {tab}"));
@@ -94,6 +96,9 @@ impl TabViewer {
 }
 
 fn main() {
+    //env_logger::init();
+    egui_logger::init()
+        .expect("Error initializing logger");
     #[cfg(debug_assertions)]
     puffin::set_scopes_on(true);
 
@@ -194,21 +199,8 @@ impl RainEngine {
                 bind_group,
                 uniform_buffer,
             });
-        let context = TabViewer {
-            angle: 1f32
-        };
 
-        let mut tree = Tree::new(vec!["Viewer".to_owned(), "tab2".to_owned()]);
-
-        // You can modify the tree before constructing the dock
-        let [a, b] = tree.split_left(NodeIndex::root(), 0.2, vec!["Hirachy".to_owned()]);
-        let [_, _] = tree.split_below(a, 0.7, vec!["Content browser".to_owned(), "Editor Debug".to_owned()]);
-        let [_, _] = tree.split_below(b, 0.65, vec!["tab5".to_owned()]);
-
-        Self {
-            tree,
-            context,
-        }
+        Self::default()
     }
 
 }
@@ -224,7 +216,7 @@ impl Default for RainEngine {
         // You can modify the tree before constructing the dock
         let [a, b] = tree.split_left(NodeIndex::root(), 0.2, vec!["Hirachy".to_owned()]);
         let [_, _] = tree.split_below(a, 0.7, vec!["Content browser".to_owned(), "Editor Debug".to_owned()]);
-        let [_, _] = tree.split_below(b, 0.65, vec!["tab5".to_owned()]);
+        let [_, _] = tree.split_below(b, 0.65, vec!["Log".to_owned()]);
 
         Self {
             tree,
