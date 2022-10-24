@@ -213,6 +213,26 @@ impl RainEngine {
 
 }
 
+impl Default for RainEngine {
+    fn default() -> Self {
+        let context = TabViewer {
+            angle: 1f32
+        };
+
+        let mut tree = Tree::new(vec!["Viewer".to_owned(), "tab2".to_owned()]);
+
+        // You can modify the tree before constructing the dock
+        let [a, b] = tree.split_left(NodeIndex::root(), 0.2, vec!["Hirachy".to_owned()]);
+        let [_, _] = tree.split_below(a, 0.7, vec!["Content browser".to_owned(), "Editor Debug".to_owned()]);
+        let [_, _] = tree.split_below(b, 0.65, vec!["tab5".to_owned()]);
+
+        Self {
+            tree,
+            context,
+        }
+    }
+}
+
 impl eframe::App for RainEngine {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         puffin::GlobalProfiler::lock().new_frame(); // call once per frame!
@@ -237,7 +257,7 @@ impl eframe::App for RainEngine {
 
                 ui.menu_button("View", |ui| {
                     if ui.button("Reset window position").clicked() {
-
+                        *self = RainEngine::default()
                     }
                 });
 
