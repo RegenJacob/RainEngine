@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use eframe::{
-    egui::{self, LayerId, Id, Ui},
+    egui::{self, Id, LayerId, Ui},
     egui_wgpu::{self, wgpu},
     wgpu::util::DeviceExt,
     Renderer,
 };
 
-use egui_dock::{Tree, NodeIndex, DockArea};
+use egui_dock::{DockArea, NodeIndex, Tree};
 
 struct RainEngine {
     tree: Tree<String>,
@@ -18,34 +18,29 @@ struct TabViewer {
     angle: f32,
 }
 
+
 impl egui_dock::TabViewer for TabViewer {
     type Tab = String;
+
+    fn add_popup(&mut self, ui: &mut Ui, _node: NodeIndex) {
+        ui.set_min_width(120.0);
+        if ui.button("Regular tab").clicked() {
+            println!("Hello")
+        }
+    }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         puffin::profile_function!(&tab);
 
         match tab.as_str() {
-            "Viewer" => {
-                //self.custom_painting(ui);
-                ui.horizontal(|ui| {
-                    if ui.button("run").clicked() {
-                        println!("cargo run [Project]")
-                    }
-                    if ui.button("build 🔨").clicked() {
-                        println!("build")
-                    }
-                });
-                egui::Frame::canvas(ui.style()).show(ui, |ui| {
-                    self.custom_painting(ui);
-                });
-
-            },
+            "Viewer" => self.viewer_tab(ui),
             "Editor Debug" => {
-                puffin_egui::profiler_ui(ui)
-            },
-            "Log" => {
-                egui_logger::logger_ui(ui)
-            },
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    puffin_egui::profiler_ui(ui) // somehow crashes when not in ScrollArea
+                });
+            }
+
+            "Log" => egui_logger::logger_ui(ui),
             _ => {
                 ui.label(format!("Content of {tab}"));
             }
@@ -60,8 +55,7 @@ impl egui_dock::TabViewer for TabViewer {
 impl TabViewer {
     fn custom_painting(&mut self, ui: &mut egui::Ui) {
         puffin::profile_function!();
-        let (rect, response) =
-            ui.allocate_at_least(ui.max_rect().size(), egui::Sense::drag());
+        let (rect, response) = ui.allocate_at_least(ui.max_rect().size(), egui::Sense::drag());
 
         self.angle += response.drag_delta().x * 0.01;
 
@@ -77,9 +71,10 @@ impl TabViewer {
         // The paint callback is called after prepare and is given access to the render pass, which
         // can be used to issue draw commands.
         let cb = egui_wgpu::CallbackFn::new()
-            .prepare(move |device, queue, paint_callback_resources| {
+            .prepare(move |device, queue, _encoder, paint_callback_resources| {
                 let resources: &TriangleRenderResources = paint_callback_resources.get().unwrap();
                 resources.prepare(device, queue, angle);
+                Vec::new()
             })
             .paint(move |_info, rpass, paint_callback_resources| {
                 let resources: &TriangleRenderResources = paint_callback_resources.get().unwrap();
@@ -93,12 +88,27 @@ impl TabViewer {
 
         ui.painter().add(callback);
     }
+
+    fn viewer_tab(&mut self, ui: &mut egui::Ui) {
+        //self.custom_painting(ui);
+        ui.horizontal(|ui| {
+            if ui.button("run").clicked() {
+                println!("cargo run [Project]")
+            }
+            if ui.button("build 🔨").clicked() {
+                println!("build")
+            }
+        });
+        egui::Frame::canvas(ui.style()).show(ui, |ui| {
+            self.custom_painting(ui);
+        });
+    }
+
 }
 
 fn main() {
-    //env_logger::init();
-    egui_logger::init()
-        .expect("Error initializing logger");
+    egui_logger::init().expect("Error initializing logger");
+
     #[cfg(debug_assertions)]
     puffin::set_scopes_on(true);
 
@@ -114,15 +124,15 @@ fn main() {
     );
 }
 
-
 impl RainEngine {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         puffin::profile_function!();
-        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
-        // Restore app state using cc.storage (requires the "persistence" feature).
-        // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
-        // for e.g. egui::PaintCallback.
-        let wgpu_render_state = cc.wgpu_render_state.as_ref().expect("WGPU enabled");
+
+        let wgpu_render_state = 
+            cc
+            .wgpu_render_state
+            .as_ref()
+            .expect("WGPU enabled");
 
         let device = &wgpu_render_state.device;
 
@@ -174,7 +184,7 @@ impl RainEngine {
             label: None,
             contents: bytemuck::cast_slice(&[0.0]),
             usage: wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::MAP_WRITE
+                //| wgpu::BufferUsages::MAP_WRITE
                 | wgpu::BufferUsages::UNIFORM,
         });
 
@@ -191,7 +201,7 @@ impl RainEngine {
         // instead of storing the pipeline in our `Custom3D` struct, we insert it into the
         // `paint_callback_resources` type map, which is stored alongside the render pass.
         wgpu_render_state
-            .egui_rpass
+            .renderer
             .write()
             .paint_callback_resources
             .insert(TriangleRenderResources {
@@ -202,26 +212,26 @@ impl RainEngine {
 
         Self::default()
     }
-
 }
 
 impl Default for RainEngine {
     fn default() -> Self {
-        let context = TabViewer {
-            angle: 1f32
-        };
+        let context = TabViewer { angle: 1f32 };
 
         let mut tree = Tree::new(vec!["Viewer".to_owned(), "tab2".to_owned()]);
 
         // You can modify the tree before constructing the dock
         let [a, b] = tree.split_left(NodeIndex::root(), 0.2, vec!["Hirachy".to_owned()]);
-        let [_, _] = tree.split_below(a, 0.7, vec!["Content browser".to_owned(), "Editor Debug".to_owned()]);
+        let [_, _] = tree.split_below(
+            a,
+            0.7,
+            vec!["Content browser".to_owned(), "Editor Debug".to_owned()],
+        );
+
+        #[cfg(debug_assertions)]
         let [_, _] = tree.split_below(b, 0.65, vec!["Log".to_owned()]);
 
-        Self {
-            tree,
-            context,
-        }
+        Self { tree, context }
     }
 }
 
@@ -232,43 +242,40 @@ impl eframe::App for RainEngine {
         let mut my_frame = egui::containers::Frame::default();
         my_frame.fill = egui::Color32::BLACK;
 
-        egui::TopBottomPanel::top("top_panel").frame(my_frame).show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    #[cfg(not(target_arch = "wasm32"))] // no File->Quit on web pages!
-                    if ui.button("Quit").clicked() {
-                        frame.close();
-                    }
-                });
+        egui::TopBottomPanel::top("top_panel")
+            .frame(my_frame)
+            .show(ctx, |ui| {
+                egui::menu::bar(ui, |ui| {
+                    ui.menu_button("File", |ui| {
+                        #[cfg(not(target_arch = "wasm32"))] // no File->Quit on web pages!
+                        if ui.button("Quit").clicked() {
+                            frame.close();
+                        }
+                    });
 
-                ui.menu_button("Edit", |ui| {
-                    if ui.button("Settings").clicked() {
+                    ui.menu_button("Edit", |ui| if ui.button("Settings").clicked() {});
 
-                    }
-                });
+                    ui.menu_button("View", |ui| {
+                        if ui.button("Reset window position").clicked() {
+                            *self = RainEngine::default()
+                        }
+                    });
 
-                ui.menu_button("View", |ui| {
-                    if ui.button("Reset window position").clicked() {
-                        *self = RainEngine::default()
-                    }
-                });
-
-                ui.menu_button("Help", |ui| {
-                    if ui.button("About RainEngine").clicked() {
-                        egui::Window::new("about").show(ctx, |ui| {
-                            ui.heading("RainEngine");
-                            ui.label("Author: Jacob");
-                        });
-                    }
+                    ui.menu_button("Help", |ui| {
+                        if ui.button("About RainEngine").clicked() {
+                            egui::Window::new("about").show(ctx, |ui| {
+                                ui.heading("RainEngine");
+                                ui.label("Author: Jacob");
+                            });
+                        }
+                    });
                 });
             });
-        });
         let layer_id = LayerId::background();
         let max_rect = ctx.available_rect();
         let clip_rect = ctx.available_rect();
         let id = Id::new("egui_dock::DockArea");
         let mut ui = Ui::new(ctx.clone(), layer_id, id, max_rect, clip_rect);
-
 
         /*
         egui::Window::new("hi").show(ctx, |ui| {
@@ -280,9 +287,11 @@ impl eframe::App for RainEngine {
 
         let mut style = egui_dock::Style::from_egui(ctx.style().as_ref());
         style.separator_width = 1.0;
-        style.separator_color = egui::Color32::BLACK;
         style.tab_rounding.nw = 7.0;
         style.tab_rounding.ne = 7.0;
+        style.tab_include_scrollarea = false;
+        style.show_add_popup = true;
+        style.show_add_buttons = true;
 
         DockArea::new(&mut self.tree)
             .style(style)
@@ -311,4 +320,3 @@ impl TriangleRenderResources {
         rpass.draw(0..3, 0..1);
     }
 }
-
