@@ -1,3 +1,4 @@
+use cloudy_renderer::CloudyRenderer;
 use std::sync::Arc;
 
 use eframe::{
@@ -7,22 +8,48 @@ use eframe::{
     Renderer,
 };
 
-use egui_dock::{DockArea, NodeIndex, Tree};
+use egui_dock::{DockArea, DockState, NodeIndex};
 
 struct RainEngine {
-    tree: Tree<String>,
+    tree: DockState<String>,
     context: TabViewer,
+}
+
+struct EditorTabCallback {
+    angle: f32,
+}
+
+impl egui_wgpu::CallbackTrait for EditorTabCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let resources: &CloudyRenderer = resources.get().unwrap();
+        resources.prepare(device, queue, self.angle);
+        Vec::new()
+    }
+
+    fn paint<'a>(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        resources: &'a egui_wgpu::CallbackResources,
+    ) {
+        let resources: &CloudyRenderer = resources.get().unwrap();
+        resources.paint(render_pass);
+    }
 }
 
 struct TabViewer {
     angle: f32,
 }
 
-
 impl egui_dock::TabViewer for TabViewer {
     type Tab = String;
-
-    fn add_popup(&mut self, ui: &mut Ui, _node: NodeIndex) {
+    fn add_popup(&mut self, ui: &mut Ui, _surface: egui_dock::SurfaceIndex, _node: NodeIndex) {
         ui.set_min_width(120.0);
         if ui.button("Regular tab").clicked() {
             println!("Hello")
@@ -35,9 +62,7 @@ impl egui_dock::TabViewer for TabViewer {
         match tab.as_str() {
             "Viewer" => self.viewer_tab(ui),
             "Editor Debug" => {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    puffin_egui::profiler_ui(ui) // somehow crashes when not in ScrollArea
-                });
+                puffin_egui::profiler_ui(ui) // somehow crashes when not in ScrollArea
             }
 
             "Log" => egui_logger::logger_ui(ui),
@@ -55,12 +80,8 @@ impl egui_dock::TabViewer for TabViewer {
 impl TabViewer {
     fn custom_painting(&mut self, ui: &mut egui::Ui) {
         puffin::profile_function!();
-        let (rect, response) = ui.allocate_at_least(ui.max_rect().size(), egui::Sense::drag());
-
-        self.angle += response.drag_delta().x * 0.01;
 
         // Clone locals so we can move them into the paint callback:
-        let angle = self.angle;
 
         // The callback function for WGPU is in two stages: prepare, and paint.
         //
@@ -70,46 +91,35 @@ impl TabViewer {
         //
         // The paint callback is called after prepare and is given access to the render pass, which
         // can be used to issue draw commands.
-        let cb = egui_wgpu::CallbackFn::new()
-            .prepare(move |device, queue, _encoder, paint_callback_resources| {
-                let resources: &TriangleRenderResources = paint_callback_resources.get().unwrap();
-                resources.prepare(device, queue, angle);
-                Vec::new()
-            })
-            .paint(move |_info, rpass, paint_callback_resources| {
-                let resources: &TriangleRenderResources = paint_callback_resources.get().unwrap();
-                resources.paint(rpass);
-            });
+        let (rect, response) = ui.allocate_at_least(ui.max_rect().size(), egui::Sense::drag());
 
-        let callback = egui::PaintCallback {
+        self.angle += response.drag_delta().x * 0.01;
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
-            callback: Arc::new(cb),
-        };
-
-        ui.painter().add(callback);
+            EditorTabCallback { angle: self.angle },
+        ));
     }
 
     fn viewer_tab(&mut self, ui: &mut egui::Ui) {
         //self.custom_painting(ui);
         ui.horizontal(|ui| {
             if ui.button("run").clicked() {
-                println!("cargo run [Project]")
+                log::info!("run")
             }
             if ui.button("build 🔨").clicked() {
-                println!("build")
+                log::info!("build")
             }
         });
         egui::Frame::canvas(ui.style()).show(ui, |ui| {
             self.custom_painting(ui);
         });
     }
-
 }
 
 fn main() {
     egui_logger::init().expect("Error initializing logger");
 
-    #[cfg(debug_assertions)]
+    //#[cfg(debug_assertions)]
     puffin::set_scopes_on(true);
 
     let native_options = eframe::NativeOptions {
@@ -121,18 +131,15 @@ fn main() {
         "RainEngine",
         native_options,
         Box::new(|cc| Box::new(RainEngine::new(cc))),
-    );
+    )
+    .unwrap();
 }
 
 impl RainEngine {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         puffin::profile_function!();
 
-        let wgpu_render_state = 
-            cc
-            .wgpu_render_state
-            .as_ref()
-            .expect("WGPU enabled");
+        let wgpu_render_state = cc.wgpu_render_state.as_ref().expect("WGPU enabled");
 
         let device = &wgpu_render_state.device;
 
@@ -156,7 +163,7 @@ impl RainEngine {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
+            label: Some("Main thing"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
@@ -167,7 +174,7 @@ impl RainEngine {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[],
+                buffers: &[cloudy_renderer::Vertex::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -180,11 +187,11 @@ impl RainEngine {
             multiview: None,
         });
 
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&[0.0]),
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(cloudy_renderer::VERTICES),
             usage: wgpu::BufferUsages::COPY_DST
-                //| wgpu::BufferUsages::MAP_WRITE
+                | wgpu::BufferUsages::VERTEX
                 | wgpu::BufferUsages::UNIFORM,
         });
 
@@ -193,7 +200,7 @@ impl RainEngine {
             layout: &bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
+                resource: buffer.as_entire_binding(),
             }],
         });
 
@@ -203,11 +210,11 @@ impl RainEngine {
         wgpu_render_state
             .renderer
             .write()
-            .paint_callback_resources
-            .insert(TriangleRenderResources {
+            .callback_resources
+            .insert(CloudyRenderer {
                 pipeline,
                 bind_group,
-                uniform_buffer,
+                buffer,
             });
 
         Self::default()
@@ -218,18 +225,22 @@ impl Default for RainEngine {
     fn default() -> Self {
         let context = TabViewer { angle: 1f32 };
 
-        let mut tree = Tree::new(vec!["Viewer".to_owned(), "tab2".to_owned()]);
+        let mut tree = DockState::new(vec!["Viewer".to_owned(), "tab2".to_owned()]);
 
         // You can modify the tree before constructing the dock
-        let [a, b] = tree.split_left(NodeIndex::root(), 0.2, vec!["Hirachy".to_owned()]);
-        let [_, _] = tree.split_below(
+        let [a, b] =
+            tree.main_surface_mut()
+                .split_left(NodeIndex::root(), 0.2, vec!["Hirachy".to_owned()]);
+        let [_, _] = tree.main_surface_mut().split_below(
             a,
             0.7,
             vec!["Content browser".to_owned(), "Editor Debug".to_owned()],
         );
 
-        #[cfg(debug_assertions)]
-        let [_, _] = tree.split_below(b, 0.65, vec!["Log".to_owned()]);
+        //#[cfg(debug_assertions)]
+        let [_, _] = tree
+            .main_surface_mut()
+            .split_below(b, 0.65, vec!["Log".to_owned()]);
 
         Self { tree, context }
     }
@@ -285,38 +296,10 @@ impl eframe::App for RainEngine {
         });
         */
 
-        let mut style = egui_dock::Style::from_egui(ctx.style().as_ref());
-        style.separator_width = 1.0;
-        style.tab_rounding.nw = 7.0;
-        style.tab_rounding.ne = 7.0;
-        style.tab_include_scrollarea = false;
-        style.show_add_popup = true;
-        style.show_add_buttons = true;
+        let style = egui_dock::Style::from_egui(ctx.style().as_ref());
 
         DockArea::new(&mut self.tree)
             .style(style)
             .show_inside(&mut ui, &mut self.context)
-    }
-}
-
-struct TriangleRenderResources {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniform_buffer: wgpu::Buffer,
-}
-
-impl TriangleRenderResources {
-    fn prepare(&self, _device: &wgpu::Device, queue: &wgpu::Queue, angle: f32) {
-        puffin::profile_function!(angle.to_string());
-        // Update our uniform buffer with the angle from the UI
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[angle]));
-    }
-
-    fn paint<'rpass>(&'rpass self, rpass: &mut wgpu::RenderPass<'rpass>) {
-        puffin::profile_function!();
-        // Draw our triangle!
-        rpass.set_pipeline(&self.pipeline);
-        rpass.set_bind_group(0, &self.bind_group, &[]);
-        rpass.draw(0..3, 0..1);
     }
 }
